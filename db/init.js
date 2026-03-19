@@ -109,6 +109,43 @@ if (computersTableSql.includes("'maintenance'") && !computersTableSql.includes("
   }
 }
 
+// Если после миграции FK в bookings указывает на computers_old, пересоздаём таблицу bookings.
+const bookingsTableSql = db.prepare(`
+  SELECT sql
+  FROM sqlite_master
+  WHERE type = 'table' AND name = 'bookings'
+`).get()?.sql || '';
+
+if (bookingsTableSql.includes('computers_old')) {
+  try {
+    db.exec('BEGIN');
+    db.exec('ALTER TABLE bookings RENAME TO bookings_old');
+    db.exec(`
+      CREATE TABLE bookings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        computer_id INTEGER NOT NULL,
+        client_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (computer_id) REFERENCES computers(id),
+        FOREIGN KEY (client_id) REFERENCES clients(id)
+      );
+    `);
+    db.exec(`
+      INSERT INTO bookings (id, computer_id, client_id, date, start_time, end_time, created_at)
+      SELECT id, computer_id, client_id, date, start_time, end_time, created_at
+      FROM bookings_old
+    `);
+    db.exec('DROP TABLE bookings_old');
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    throw e;
+  }
+}
+
 // Работники (должность, телефон и т.д.)
 db.exec(`
   CREATE TABLE IF NOT EXISTS workers (
